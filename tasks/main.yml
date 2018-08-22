@@ -1,0 +1,42 @@
+---
+
+- name: install nvme tools
+  apt:
+    name: nvme-cli
+    state: present
+
+- name: check if any nvme devices exist
+  command: nvme list
+  register: nvme_exist
+  changed_when: False
+
+- name: Install files
+  block:
+    - name: Install ebs mapper script
+      copy:
+        src: "{{ role_path }}/files/ebs-nvme-mapping.sh"
+        dest: "/usr/local/bin/ebs-nvme-mapping"
+        owner: root
+        group: root
+        mode: 0755
+
+    - name: Install udev rules
+      copy:
+        src: "{{ role_path }}/files/999-aws-ebs-nvme.rules"
+        dest: "/etc/udev/rules.d/999-aws-ebs-nvme.rules"
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Ensure script runs once
+      command: /usr/local/bin/ebs-nvme-mapping
+      changed_when: False
+
+  when: not(nvme_exist.stdout | regex_search('No NVMe devices detected.'))
+
+- name: remove nvme tool
+  apt:
+    name: nvme-cli
+    state: absent
+  when: nvme_exist.stdout | regex_search('No NVMe devices detected.')
+

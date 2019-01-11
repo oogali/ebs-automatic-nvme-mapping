@@ -1,4 +1,4 @@
-# Automatic Mapping of NVMe-style EBS Volums to Standard Block Device Paths
+# Automatic Mapping of NVMe-style EBS Volumes to Standard Block Device Paths
 
 1. [Introduction](#introduction)
 2. [The Problem](#the-problem)

@@ -9,6 +9,7 @@
   command: nvme list
   register: nvme_exist
   changed_when: False
+  check_mode: no
 
 - name: Install files
   block:

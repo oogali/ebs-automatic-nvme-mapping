@@ -282,7 +282,7 @@ So, let's trim the trailing spaces for a viable block device name.
 /dev/xvdf
 ```
 
-We now have our desired block device name. 
+We now have our desired block device name.
 
 ## The Hacky Solution
 
@@ -378,51 +378,13 @@ your configuation.
 
 I've picked `ATTRS{model}`.
 
-Let's combine what we've found into a shell script...
+Let's combine what we've found into a [shell script](ebs-nvme-mapping.sh), and a [udev rule](999-aws-ebs-nvme.rules)...
+
+...and finally reload the `udev` rules and trigger it...
 
 ```
-[ec2-user@ip-10-81-66-128 ~]$ cat <<EOF> ebs-nvme-mapping.sh
-> #!/bin/bash
-> 
-> if [[ ! -x /usr/sbin/nvme ]]; then
->   echo "ERROR: NVME tools not installed." >> /dev/stderr
->   exit 1
-> fi
-> 
-> if [[ ! -b ${1} ]]; then
->   echo "ERROR: cannot find block device ${1}" >> /dev/stderr
->   exit 1
-> fi
-> 
-> # capture 32 bytes at an offset of 3072 bytes from the raw-binary data
-> # not all block devices are extracted with /dev/ prefix
-> # use `xvd` prefix instead of `sd`
-> # remove all trailing space
-> nvme_link=$( \
->   /usr/sbin/nvme id-ctrl --raw-binary "${1}" | \
->   /usr/bin/cut -c3073-3104 | \
->   /bin/sed 's/^\/dev\///g'| \
->   /bin/sed 's/^sd/xvd/'| \
->   /usr/bin/tr -d '[:space:]' \
-> );
-> echo $nvme_link;
-> EOF
-[ec2-user@ip-10-81-66-128 ~]$ sudo install -m 0755 ebs-nvme-mapping.sh /usr/local/sbin/
-[ec2-user@ip-10-81-66-128 ~]$
+[ec2-user@ip-10-81-66-128 ~]$ sudo udevadm control --reload-rules && udevadm trigger
 ```
-
-...and a udev rule...
-
-```
-[ec2-user@ip-10-81-66-128 ~]$ cat <<EOF> 999-aws-ebs-nvme.rules
-> SUBSYSTEM=="block", KERNEL=="nvme[0-9]*n[0-9]*", ATTRS{model}=="Amazon Elastic Block Store", PROGRAM+="/usr/local/sbin/ebs-nvme-mapping.sh /dev/%k" SYMLINK+="%c"
-> EOF
-[ec2-user@ip-10-81-66-128 ~]$ sudo install -m 0644 999-aws-ebs-nvme.rules /etc/udev/rules.d/
-[ec2-user@ip-10-81-66-128 ~]$
-```
-
-`udev` will automatically reload rules upon changes to files in the rules directory. So we're locked
-and loaded.
 
 Now, when we attach and detach EBS volumes, our shell script will run.
 

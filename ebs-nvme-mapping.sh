@@ -1,7 +1,7 @@
 #!/bin/bash
 # To be used with the udev rule: /etc/udev/rules.d/999-aws-ebs-nvme.rules
 
-if [[ ! -x /usr/sbin/nvme ]]; then
+if [[ ! -x nvme ]]; then
   echo "ERROR: NVME tools not installed." >> /dev/stderr
   exit 1
 fi
@@ -16,10 +16,10 @@ fi
 # use `xvd` prefix instead of `sd`
 # remove all trailing space
 nvme_link=$( \
-  /usr/sbin/nvme id-ctrl --raw-binary "${1}" | \
-  /usr/bin/cut -c3073-3104 | \
-  /bin/sed 's/^\/dev\///g'| \
-  /bin/sed 's/^sd/xvd/'| \
-  /usr/bin/tr -d '[:space:]' \
+  nvme id-ctrl --raw-binary "${1}" | \
+  cut -c3073-3104 | \
+  sed 's/^\/dev\///g'| \
+  sed 's/^sd/xvd/'| \
+  tr -d '[:space:]' \
 );
 echo $nvme_link;

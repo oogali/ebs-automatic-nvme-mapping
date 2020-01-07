@@ -19,7 +19,6 @@ nvme_link=$( \
   nvme id-ctrl --raw-binary "${1}" | \
   cut -c3073-3104 | \
   sed 's/^\/dev\///g'| \
-  sed 's/^sd/xvd/'| \
   tr -d '[:space:]' \
 );
 echo $nvme_link;

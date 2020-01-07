@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # To be used with the udev rule: /etc/udev/rules.d/999-aws-ebs-nvme.rules
 
 if [[ ! -x nvme ]]; then

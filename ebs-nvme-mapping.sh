@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # To be used with the udev rule: /etc/udev/rules.d/999-aws-ebs-nvme.rules
 
-if [[ ! -x nvme ]]; then
+if [[ -z nvme ]]; then
   echo "ERROR: NVME tools not installed." >> /dev/stderr
   exit 1
 fi

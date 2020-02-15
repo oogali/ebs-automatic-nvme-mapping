@@ -53,7 +53,7 @@ $ aws --profile=personal-aws-testing ec2 --region=us-east-1 \
 
 $ aws --profile=personal-aws-testing ec2 --region=us-east-1 \
     attach-volume \
-      --device=/dev/xvdt \
+      --device=/dev/sdf \
       --instance-id=i-44444444444444444 \
       --volume-id=vol-22222222222222222
 ```
@@ -61,11 +61,11 @@ $ aws --profile=personal-aws-testing ec2 --region=us-east-1 \
 Right, now let's verify our volume was attached.
 
 ```
-[ec2-user@ip-10-81-66-128 ~]$ dmesg | grep xvdt
+[ec2-user@ip-10-81-66-128 ~]$ dmesg | grep xvdf
 [ec2-user@ip-10-81-66-128 ~]$
 ```
 
-Uh, there's no mention of our block device (`xvdt`) in the kernel output. What about NVMe devices?
+Uh, there's no mention of our block device (`xvdf`) in the kernel output. What about NVMe devices?
 
 ```
 [  504.204889] nvme 0000:00:1f.0: enabling device (0000 -> 0002)
@@ -97,7 +97,7 @@ Node             SN                   Model                                    V
 ```
 
 The summary output shows our root EBS device (`/dev/nvme0n1`) and our newly created-and-attached
-device (`/dev/nvme1n1`).
+ device (`/dev/nvme1n1`).
 
 #### Can we get more information about our device? Yes.
 
@@ -160,7 +160,7 @@ ps    1 : mp:0.00W operational enlat:0 exlat:0 rrt:0 rrl:0
 ...
 vs[]:
        0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
-0000: 2f 64 65 76 2f 78 76 64 74 20 20 20 20 20 20 20 "/dev/xvdt......."
+0000: 2f 64 65 76 2f 78 76 64 66 20 20 20 20 20 20 20 "/dev/xvdf......."
 0010: 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 "................"
 0020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 "................"
 0030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 "................"
@@ -250,7 +250,7 @@ out the information block inclusive of the vendor-specific data.
 00000800  01 00 00 00 40 42 0f 00  40 42 0f 00 00 00 00 00  |....@B..@B......|
 00000810  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
 *
-00000c00  2f 64 65 76 2f 78 76 64  74 20 20 20 20 20 20 20  |/dev/xvdt       |
+00000c00  2f 64 65 76 2f 78 76 64  66 20 20 20 20 20 20 20  |/dev/xvdf       |
 00000c10  20 20 20 20 20 20 20 20  20 20 20 20 20 20 20 20  |                |
 00000c20  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
 *
@@ -262,7 +262,7 @@ The information within the vendor-specific data we are looking for appears to st
 
 ```
 [ec2-user@ip-10-81-66-128 ~]$ sudo nvme id-ctrl --raw-binary /dev/nvme1n1 | cut -c3073-3104
-/dev/xvdt<AND 23 SPACES YOU DO NOT READILY SEE>
+/dev/xvdf<AND 23 SPACES YOU DO NOT READILY SEE>
 ```
 
 It looks fine... but it has trailing spaces. How to verify that? Count the characters.
@@ -279,17 +279,17 @@ So, let's trim the trailing spaces for a viable block device name.
 
 ```
 [ec2-user@ip-10-81-66-128 ~]$ sudo nvme id-ctrl --raw-binary /dev/nvme1n1 | cut -c3073-3104 | tr -s ' ' | sed 's/ $//g'
-/dev/xvdt
+/dev/xvdf
 ```
 
-We now have our desired block device name. 
+We now have our desired block device name.
 
 ## The Hacky Solution
 
 We can create a symbolic link from the origin NVMe device, to the desired block device name.
 
 ```
-[ec2-user@ip-10-81-66-128 ~]$ sudo ln -s /dev/nvme1n1 /dev/xvdt
+[ec2-user@ip-10-81-66-128 ~]$ sudo ln -s /dev/nvme1n1 /dev/xvdf
 [ec2-user@ip-10-81-66-128 ~]$
 ```
 
@@ -378,37 +378,13 @@ your configuation.
 
 I've picked `ATTRS{model}`.
 
-Let's combine what we've found into a shell script...
+Let's combine what we've found into a [shell script](ebs-nvme-mapping.sh), and a [udev rule](999-aws-ebs-nvme.rules)...
+
+...and finally reload the `udev` rules and trigger it...
 
 ```
-[ec2-user@ip-10-81-66-128 ~]$ cat <<EOF> ebs-nvme-mapping
-> #!/bin/bash
-> 
-> PATH="${PATH}:/usr/sbin"
-> 
-> for blkdev in $( nvme list | awk '/^\/dev/ { print $1 }' ) ; do
->   mapping=$(nvme id-ctrl --raw-binary "${blkdev}" | cut -c3073-3104 | tr -s ' ' | sed 's/ $//g')
->   if [[ "${mapping}" == /dev/* ]]; then
->     ( test -b "${blkdev}" && test -L "${mapping}" ) || ln -s "${blkdev}" "${mapping}"
->   fi
-> done
-> EOF
-[ec2-user@ip-10-81-66-128 ~]$ sudo install -m 0755 ebs-nvme-mapping /usr/local/bin/
-[ec2-user@ip-10-81-66-128 ~]$
+[ec2-user@ip-10-81-66-128 ~]$ sudo udevadm control --reload-rules && udevadm trigger
 ```
-
-...and a udev rule...
-
-```
-[ec2-user@ip-10-81-66-128 ~]$ cat <<EOF> 999-aws-ebs-nvme.rules
-> ACTION=="add", SUBSYSTEM=="block", KERNEL=="nvme[1-26]n1", ATTRS{model}=="Amazon Elastic Block Store              ", RUN+="/usr/local/bin/ebs-nvme-mapping"
-> EOF
-[ec2-user@ip-10-81-66-128 ~]$ sudo install -m 0644 999-aws-ebs-nvme.rules /etc/udev/rules.d/
-[ec2-user@ip-10-81-66-128 ~]$
-```
-
-`udev` will automatically reload rules upon changes to files in the rules directory. So we're locked
-and loaded.
 
 Now, when we attach and detach EBS volumes, our shell script will run.
 
@@ -418,97 +394,15 @@ Now, when we attach and detach EBS volumes, our shell script will run.
 
 ```
 [ec2-user@ip-10-81-66-128 ~]$ sudo udevadm test /sys/block/nvme1n1
-run_command: calling: test
-adm_test: version 173
-This program is for debugging only, it does not run any program,
-specified by a RUN key. It may show incorrect results, because
-some values may be different, or not available at a simulation run.
-
-parse_file: reading '/lib/udev/rules.d/10-console.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/10-dm.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/11-dm-lvm.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/13-dm-disk.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/42-qemu-usb.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/50-firmware.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/50-udev-default.rules' as rules file
-parse_file: reading '/etc/udev/rules.d/51-ec2-hvm-devices.rules' as rules file
-parse_file: reading '/etc/udev/rules.d/52-ec2-vcpu.rules' as rules file
-parse_file: reading '/etc/udev/rules.d/53-ec2-network-interfaces.rules' as rules file
-parse_file: reading '/etc/udev/rules.d/60-cdrom_id.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/60-floppy.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/60-net.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/60-persistent-alsa.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/60-persistent-input.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/60-persistent-serial.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/60-persistent-storage-tape.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/60-persistent-storage.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/60-persistent-v4l.rules' as rules file
-parse_file: reading '/etc/udev/rules.d/60-raw.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/61-accelerometer.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/64-md-raid.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/65-md-incremental.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/69-dm-lvm-metad.rules' as rules file
-parse_file: reading '/etc/udev/rules.d/70-ec2-nvme-devices.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/75-cd-aliases-generator.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/75-net-description.rules' as rules file
-parse_file: reading '/etc/udev/rules.d/75-persistent-net-generator.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/75-probe_mtd.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/75-tty-description.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/78-sound-card.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/80-drivers.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/81-kvm-rhel.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/88-clock.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/95-dm-notify.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/95-keyboard-force-release.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/95-keymap.rules' as rules file
-parse_file: reading '/lib/udev/rules.d/95-udev-late.rules' as rules file
-parse_file: reading '/dev/.udev/rules.d/99-root.rules' as rules file
-parse_file: reading '/etc/udev/rules.d/999-aws-ebs-nvme.rules' as rules file
-udev_rules_new: rules use 23184 bytes tokens (1932 * 12 bytes), 15869 bytes buffer
-udev_rules_new: temporary index used 15140 bytes (757 * 20 bytes)
-udev_device_new_from_syspath: device 0x55e241effc90 has devpath '/devices/pci0000:00/0000:00:1f.0/nvme/nvme1/nvme1n1'
-udev_device_new_from_syspath: device 0x55e241effdc0 has devpath '/devices/pci0000:00/0000:00:1f.0/nvme/nvme1/nvme1n1'
-udev_device_read_db: device 0x55e241effdc0 filled with db file data
-udev_rules_apply_to_event: GROUP 6 /lib/udev/rules.d/50-udev-default.rules:68
-udev_rules_apply_to_event: IMPORT 'path_id /devices/pci0000:00/0000:00:1f.0/nvme/nvme1/nvme1n1' /lib/udev/rules.d/60-persistent-storage.rules:61
-udev_event_spawn: starting 'path_id /devices/pci0000:00/0000:00:1f.0/nvme/nvme1/nvme1n1'
-spawn_read: 'path_id /devices/pci0000:00/0000:00:1f.0/nvme/nvme1/nvme1n1'(out) 'ID_PATH=pci-0000:00:1f.0'
-spawn_read: 'path_id /devices/pci0000:00/0000:00:1f.0/nvme/nvme1/nvme1n1'(out) 'ID_PATH_TAG=pci-0000_00_1f_0'
-spawn_wait: 'path_id /devices/pci0000:00/0000:00:1f.0/nvme/nvme1/nvme1n1' [22764] exit with return code 0
-udev_rules_apply_to_event: LINK 'disk/by-path/pci-0000:00:1f.0' /lib/udev/rules.d/60-persistent-storage.rules:62
-udev_rules_apply_to_event: IMPORT '/sbin/blkid -o udev -p /dev/nvme1n1' /lib/udev/rules.d/60-persistent-storage.rules:74
-udev_event_spawn: starting '/sbin/blkid -o udev -p /dev/nvme1n1'
-spawn_wait: '/sbin/blkid -o udev -p /dev/nvme1n1' [22765] exit with return code 2
-udev_device_new_from_syspath: device 0x55e241efff80 has devpath '/devices/pci0000:00/0000:00:1f.0/nvme/nvme1'
-udev_rules_apply_to_event: 3 character(s) replaced
-udev_rules_apply_to_event: LINK 'disk/by-id/nvme-Amazon_Elastic_Block_Store_vol22222222222222222-ns-1' /etc/udev/rules.d/70-ec2-nvme-devices.rules:17
-udev_rules_apply_to_event: RUN '/usr/local/bin/ebs-nvme-mapping' /etc/udev/rules.d/999-aws-ebs-nvme.rules:1
-udev_event_execute_rules: no node name set, will use kernel supplied name 'nvme1n1'
-udev_node_add: creating device node '/dev/nvme1n1', devnum=259:3, mode=0660, uid=0, gid=6
-udev_node_mknod: preserve file '/dev/nvme1n1', because it has correct dev_t
-udev_node_mknod: preserve permissions /dev/nvme1n1, 060660, uid=0, gid=6
-node_symlink: preserve already existing symlink '/dev/block/259:3' to '../nvme1n1'
-link_find_prioritized: found 'b259:3' claiming '/dev/.udev/links/disk\x2fby-path\x2fpci-0000:00:1f.0'
-link_update: creating link '/dev/disk/by-path/pci-0000:00:1f.0' to '/dev/nvme1n1'
-node_symlink: preserve already existing symlink '/dev/disk/by-path/pci-0000:00:1f.0' to '../../nvme1n1'
-link_find_prioritized: found 'b259:3' claiming '/dev/.udev/links/disk\x2fby-id\x2fnvme-Amazon_Elastic_Block_Store_vol22222222222222222-ns-1'
-link_update: creating link '/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_vol22222222222222222-ns-1' to '/dev/nvme1n1'
-node_symlink: preserve already existing symlink '/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_vol22222222222222222-ns-1' to '../../nvme1n1'
-udev_device_update_db: created db file '/dev/.udev/data/b259:3' for '/devices/pci0000:00/0000:00:1f.0/nvme/nvme1/nvme1n1'
-UDEV_LOG=6
-DEVPATH=/devices/pci0000:00/0000:00:1f.0/nvme/nvme1/nvme1n1
-MAJOR=259
-MINOR=3
-DEVNAME=/dev/nvme1n1
-DEVTYPE=disk
-ACTION=add
-SUBSYSTEM=block
-ID_PATH=pci-0000:00:1f.0
-ID_PATH_TAG=pci-0000_00_1f_0
-DEVLINKS=/dev/disk/by-path/pci-0000:00:1f.0 /dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_vol22222222222222222-ns-1
-.ID_FS_TYPE_NEW=
-ID_FS_TYPE=
-run: '/usr/local/bin/ebs-nvme-mapping'
+[...]
+Reading rules file: /etc/udev/rules.d/999-aws-ebs-nvme.rules
+[...]
+starting '/usr/local/sbin/ebs-nvme-mapping.sh /dev/nvme1n1'
+[...]
+'/usr/local/sbin/ebs-nvme-mapping.sh /dev/nvme1n1'(out) 'xvdf'
+[...]
+creating link '/dev/xvdf' to '/dev/nvme1n1'
+[...]
 ```
 
 ### Live run
@@ -533,7 +427,7 @@ $ aws --profile=personal-aws-testing ec2 --region=us-east-1 \
 
 $ aws --profile=personal-aws-testing ec2 --region=us-east-1 \
     attach-volume \
-      --device=/dev/xvdf \
+      --device=/dev/sdf \
       --instance-id=i-44444444444444444 \
       --volume-id=vol-22222222222222222
 ...

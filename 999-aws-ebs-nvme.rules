@@ -1,1 +1,1 @@
-ACTION=="add", SUBSYSTEM=="block", KERNEL=="nvme[1-26]n1", ATTRS{model}=="Amazon Elastic Block Store              ", RUN+="/usr/local/bin/ebs-nvme-mapping"
+SUBSYSTEM=="block", KERNEL=="nvme[0-26]n1", ATTRS{model}=="Amazon Elastic Block Store", PROGRAM+="/usr/local/sbin/ebs-nvme-mapping.sh /dev/%k" SYMLINK+="%c"

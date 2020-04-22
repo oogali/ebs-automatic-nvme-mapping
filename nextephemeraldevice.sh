@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# To be used with the udev rule: /etc/udev/rules.d/999-aws-ebs-nvme.rules
 
 kern_name=${1}
 incr=0

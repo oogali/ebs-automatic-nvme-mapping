@@ -13,7 +13,6 @@ fi
 
 # capture 32 bytes at an offset of 3072 bytes from the raw-binary data
 # not all block devices are extracted with /dev/ prefix
-# use `xvd` prefix instead of `sd`
 # remove all trailing space
 nvme_link=$( \
   nvme id-ctrl --raw-binary "${1}" | \

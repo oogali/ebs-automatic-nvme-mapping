@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # To be used with the udev rule: /etc/udev/rules.d/999-aws-ebs-nvme.rules
 
 if [[ -z nvme ]]; then
@@ -16,9 +16,9 @@ fi
 # use `xvd` prefix instead of `sd`
 # remove all trailing space
 nvme_link=$( \
-  nvme id-ctrl --raw-binary "${1}" | \
-  cut -c3073-3104 | \
-  sed 's/^\/dev\///g'| \
-  tr -d '[:space:]' \
+  /usr/sbin/nvme id-ctrl --output binary "${1}" | \
+  /usr/bin/cut -c3073-3104 | \
+  /bin/sed 's/^\/dev\///g'| \
+  /usr/bin/tr -d '[:space:]' \
 );
 echo $nvme_link;

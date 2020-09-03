@@ -16,7 +16,7 @@ fi
 # use `xvd` prefix instead of `sd`
 # remove all trailing space
 nvme_link=$( \
-  nvme id-ctrl --raw-binary "${1}" | \
+  nvme id-ctrl --output binary "${1}" | \
   cut -c3073-3104 | \
   sed 's/^\/dev\///g'| \
   tr -d '[:space:]' \

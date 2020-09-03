@@ -1,1 +1,2 @@
 SUBSYSTEM=="block", KERNEL=="nvme[0-9]*n1", ATTRS{model}=="Amazon Elastic Block Store", PROGRAM+="/usr/local/sbin/ebs-nvme-mapping.sh /dev/%k" SYMLINK+="%c"
+KERNEL=="nvme[0-9]*n[0-9]*", ENV{DEVTYPE}=="disk", ATTRS{model}=="Amazon EC2 NVMe Instance Storage", PROGRAM="/usr/local/bin/nextdevice %k", SYMLINK+="%c"
